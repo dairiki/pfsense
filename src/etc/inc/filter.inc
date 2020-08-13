@@ -614,6 +614,9 @@ function filter_generate_scrubing() {
 	global $config, $FilterIflist;
 	$scrubrules = "";
 
+	/* GTD: Hook for customizations of scrub rules */
+	$scrubrules .= "include \"/etc/pf/local.scrub.conf\"\n";
+
 	if (isset($config['system']['maxmss_enable'])) {
 		$maxmss = 1400;
 		if (!empty($config['system']['maxmss'])) {
