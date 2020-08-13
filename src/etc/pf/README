@@ -1,0 +1,8 @@
+This directory added on 2020-08-09 by Jeff Dairiki <dairiki@dairiki.org>.
+
+/etc/inc/filter.inc has been hacked to include snippets from this directory in the PF rules.
+
+Currently the only supported file is /etc/pf/local.scrub.conf which gets included right before
+the pfSense-generated scrub rules.
+
+
