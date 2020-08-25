@@ -164,6 +164,7 @@ function services_radvd_configure($blacklist = array()) {
 		} else {
 			$radvdconf .= "\t\tDeprecatePrefix on;\n";
 		}
+		$_adv_autonomous = ($ifcfgsnv6 == 64) ? "on" : "off";
 		switch ($dhcpv6ifconf['ramode']) {
 			case "managed":
 				$radvdconf .= "\t\tAdvOnLink on;\n";
@@ -176,11 +177,11 @@ function services_radvd_configure($blacklist = array()) {
 			case "stateless_dhcp":
 			case "assist":
 				$radvdconf .= "\t\tAdvOnLink on;\n";
-				$radvdconf .= "\t\tAdvAutonomous on;\n";
+				$radvdconf .= "\t\tAdvAutonomous $_adv_autonomous;\n";
 				break;
 			case "unmanaged":
 				$radvdconf .= "\t\tAdvOnLink on;\n";
-				$radvdconf .= "\t\tAdvAutonomous on;\n";
+				$radvdconf .= "\t\tAdvAutonomous $_adv_autonomous;\n";
 				break;
 		}
 
@@ -203,6 +204,7 @@ function services_radvd_configure($blacklist = array()) {
 				if (is_subnetv6($subnet)) {
 					$radvdconf .= "\tprefix {$subnet} {\n";
 					$radvdconf .= "\t\tDeprecatePrefix on;\n";
+					$_subnet_adv_autonomous = (substr(rtrim($subnet), -3) == '/64') ? "on" : "off";
 					switch ($dhcpv6ifconf['ramode']) {
 						case "managed":
 							$radvdconf .= "\t\tAdvOnLink on;\n";
@@ -214,11 +216,11 @@ function services_radvd_configure($blacklist = array()) {
 							break;
 						case "assist":
 							$radvdconf .= "\t\tAdvOnLink on;\n";
-							$radvdconf .= "\t\tAdvAutonomous on;\n";
+							$radvdconf .= "\t\tAdvAutonomous $_subnet_adv_autonomous;\n";
 							break;
 						case "unmanaged":
 							$radvdconf .= "\t\tAdvOnLink on;\n";
-							$radvdconf .= "\t\tAdvAutonomous on;\n";
+							$radvdconf .= "\t\tAdvAutonomous $_subnet_adv_autonomous;\n";
 							break;
 					}
 					$radvdconf .= "\t};\n";
