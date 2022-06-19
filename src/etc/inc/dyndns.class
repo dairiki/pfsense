@@ -264,6 +264,12 @@
 			case 'digitalocean-v6':
 			case 'linode':
 			case 'linode-v6':
+			case 'onecom':
+			case 'onecom-v6':
+			case 'gandi-livedns':
+			case 'gandi-livedns-v6':
+			case 'yandex':
+			case 'yandex-v6':
 				if (!$dnsPass) $this->_error(4);
 				if (!$dnsHost) $this->_error(5);
 				if (!$dnsDomain) $this->_error(5);
@@ -276,12 +282,6 @@
 				if (!$dnsHost) $this->_error(5);
 				if (!$dnsZoneID) $this->_error(8);
 				if (!$dnsTTL) $this->_error(9);
-				break;
-			case 'gandi-livedns': // NOTE: same as digitalocean
-				if (!$dnsPass) $this->_error(4);//API key
-				if (!$dnsHost) $this->_error(5); //DNS Record to update
-				if (!$dnsDomain) $this->_error(5);//domain
-				if (!$dnsTTL) $this->_error(9);//ttl
 				break;
 			case 'custom':
 			case 'custom-v6':
@@ -308,10 +308,13 @@
 				case 'godaddy-v6':
 				case 'azurev6':
 				case 'linode-v6':
+				case 'mythicbeasts-v6':
 				case 'noip-v6':
 				case 'noip-free-v6':
 				case 'dynv6-v6':
 				case 'easydns-v6':
+				case 'gandi-livedns-v6':
+				case 'yandex-v6':
 					$this->_useIPv6 = true;
 					break;
 				default:
@@ -384,6 +387,8 @@
 					case 'custom-v6':
 					case 'opendns':
 					case 'namecheap':
+					case 'nicru':
+					case 'nicru-v6':
 					case 'he-net':
 					case 'he-net-v6':
 					case 'duiadns':
@@ -415,8 +420,13 @@
 					case 'linode':
 					case 'linode-v6':
 					case 'gandi-livedns':
+					case 'gandi-livedns-v6':
 					case 'dynv6':
 					case 'dynv6-v6':
+					case 'mythicbeasts':
+					case 'mythicbeasts-v6':
+					case 'yandex':
+					case 'yandex-v6':
 						$this->_update();
 						if ($this->_dnsDummyUpdateDone == true) {
 							// If a dummy update was needed, then sleep a while and do the update again to put the proper address back.
@@ -565,7 +575,7 @@
 				case 'noip':
 				case 'noip-free':
 					$needsIP = TRUE;
-					curl_setopt($ch, CURLOPT_USERPWD, $this->_dnsUser . ':' . $this->_dnsPass);
+					curl_setopt($ch, CURLOPT_USERPWD, urlencode($this->_dnsUser) . ':' . urlencode($this->_dnsPass));
 					$server = "https://dynupdate.no-ip.com/nic/update";
 					$port = "";
 					if ($this->_dnsServer) {
@@ -772,6 +782,23 @@
 					$server = "https://{$this->_dnsUser}:{$this->_dnsPass}@api.domeneshop.no/v0/dyndns/update?hostname={$this->_dnsHost}&myip={$this->_dnsIP}";
 					curl_setopt($ch, CURLOPT_URL, $server);
 					break;
+				case 'mythicbeasts':
+				case 'mythicbeasts-v6':
+					/* Example:
+						https://{login}:{password}@https://api.mythic-beasts.com/dns/v2/zones/example.com/records/test1/A -d data=1.2.3.4
+					*/
+					$needsIP = FALSE;
+					if ($this->_useIPv6) {
+						$record = "AAAA"; 
+					} else {
+						$record = "A"; 
+					}
+					$post_data['data'] = $this->_dnsIP;
+					$server = "https://api.mythic-beasts.com/dns/v2/zones/{$this->_dnsDomain}/records/{$this->_dnsHost}/{$record}";
+					curl_setopt($ch, CURLOPT_USERPWD, $this->_dnsUser . ':' . $this->_dnsPass);
+					curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+					curl_setopt($ch, CURLOPT_URL, $server);
+					break;
 				case 'namecheap':
 					/* Example:
 						https://dynamicdns.park-your-domain.com/update?host=[host_name]&domain=[domain.com]&password=[domain_password]&ip=[your_ip]
@@ -780,6 +807,62 @@
 					$dnspass = trim($this->_dnsPass);
 					$server = "https://dynamicdns.park-your-domain.com/update?host={$this->_dnsHost}&domain={$this->_dnsDomain}&password={$dnspass}&ip={$this->_dnsIP}";
 					curl_setopt($ch, CURLOPT_URL, $server);
+					break;
+				case 'nicru':
+				case 'nicru-v6':
+					/* see https://www.nic.ru/help/dynamic-dns-for-developers_5810.html */
+					$needsIP = FALSE;
+					if (is_ipaddrv6($this->_dnsIP)) {
+						$iptype = "ipv6";
+					} else {
+						$iptype = "myip";
+					}
+					curl_setopt($ch, CURLOPT_USERPWD, $this->_dnsUser . ':' . $this->_dnsPass);
+					$server = "https://api.nic.ru/dyndns/update?hostname={$this->_dnsHost}&{$iptype}={$this->_dnsIP}";
+					curl_setopt($ch, CURLOPT_URL, $server);
+					break;
+				case 'yandex':
+				case 'yandex-v6':
+					// https://yandex.com/dev/connect/directory/api/concepts/domains/dns-records-via-pdd.html
+
+					if (is_ipaddrv4($this->_dnsIP)) {
+						$type = 'A';
+					} else {
+						$type = 'AAAA';
+					}
+
+					// get record_id
+					curl_setopt($ch, CURLOPT_URL, "https://pddimp.yandex.ru/api2/admin/dns/list?domain={$this->_dnsDomain}");
+					curl_setopt($ch, CURLOPT_HTTPHEADER, 'PddToken: ' . $this->_dnsPass);
+					$output = json_decode(curl_exec($ch), true);
+					if (is_array($output["records"])) {
+						foreach($output["records"] as $record) {
+							if (($record["domain"] == $this->_dnsDomain) &&
+							    ($record["subdomain"] == $this->_dnsHost) &&
+							    ($record["type"] == $type)) {
+								$record_id = $record["record_id"];
+							}
+						}
+					}
+
+					if ($record_id) {
+						$action = 'edit';
+						$post_data['record_id'] = $record_id;
+					} else {
+						$action = 'add';
+					}
+
+					$post_data['domain'] = $this->_dnsDomain;
+					$post_data['subdomain'] = $this->_dnsHost;
+					$post_data['content'] = $this->_dnsIP;
+					$post_data['type'] = $type;
+					if ($this->_dnsTTL) {
+						$post_data['ttl'] = $this->_dnsTTL;
+					}
+						
+					curl_setopt($ch, CURLOPT_URL, 'https://pddimp.yandex.ru/api2/admin/dns/' . $action);
+					curl_setopt($ch, CURLOPT_HTTPHEADER, 'PddToken: ' . $this->_dnsPass);
+					curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
 					break;
 				case 'duiadns':
 				case 'duiadns-v6':
@@ -1096,6 +1179,75 @@
 						log_error("HostID:{$hostID}, OldIP:{$hostIP}");
 					}
 					break;
+				case 'onecom':
+				case 'onecom-v6':
+					// see https://redmine.pfsense.org/issues/11293
+
+					// login in
+					$post_data['displayUsername'] = $this->_dnsUser;
+					$post_data['username'] = $this->_dnsUser;
+					$post_data['password1'] = $this->_dnsPass;
+					$post_data['loginDomain'] = True;
+					$post_data['loginTarget'] = '';
+					$post_data['targetDomain'] = '';
+
+					curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+					curl_setopt($ch, CURLOPT_URL, "https://www.one.com/admin/login.do");
+					curl_setopt($ch, CURLOPT_HEADER, 1); //return the full headers to extract the cookies
+					$output = curl_exec($ch);
+
+					// extract the cookies
+					preg_match_all("/^Set-cookie: (.*?);/ism", $output, $cookies);
+					if( count($cookies[1]) > 0 ){
+						$cookie_data = implode("; ",$cookies[1]);
+					}
+
+					// gets all DNS records of the domain.
+					$post_data = null;
+					$url = "https://www.one.com/admin/api/domains/" . $this->_dnsDomain + "/dns/custom_records";
+					curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+					curl_setopt($ch, CURLOPT_COOKIE, $cookie_data);
+					curl_setopt($ch, CURLOPT_HEADER, 0);
+					curl_setopt($ch, CURLOPT_URL, $url);
+					curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'GET');
+					$output = curl_exec($ch);
+					$result = json_decode($output, true);
+					$records = $result['result']['data'];
+
+					// finds the record id of a record from it's subdomain
+					foreach ($records as $rec) {
+						if ($rec['attributes']['prefix'] == $this->_dnsHostname) {
+							$id = $rec['id'];
+							break;
+						}
+					}
+					if (!$id) {
+						log_error("Could not find one.com hostname record id");
+						return false;
+					}
+
+					// changes the IP Address of a TYPE A record. Default TTL=3800
+					$tosend = array();
+					$tosend['type'] = 'dns_service_records';
+					$tosend['id'] = $id;
+					if (is_ipaddrv4($this->_dnsIP)) {
+						$rectype = 'A';
+					} else {
+						$rectype = 'AAAA';
+					}
+					$tosend['attributes'] = array(
+						'type' => $rectype,
+						'prefix' => $this->_dnsHostname,
+						'content' => $this->_dnsIP,
+						'ttl' => $this->_dnsTTL
+					);
+					$url = "https://www.one.com/admin/api/domains/" . $this->_dnsDomain .
+						 "/dns/custom_records/" . $id;
+					curl_setopt($ch, CURLOPT_URL, $url);
+					curl_setopt($ch, CURLOPT_HTTPHEADER, array("Content-Type: application/json"));
+					curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($tosend));
+					curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PATCH');
+					break;
 				case 'dreamhost':
 				case 'dreamhost-v6':
 					$needsIP = TRUE;
@@ -1384,42 +1536,27 @@
 					$needIP = TRUE;
 					curl_setopt($ch, CURLOPT_URL, 'https://dynv6.com/api/update?ipv6=' . $this->_dnsIP . '&hostname=' . $this->_dnsHost . '&token=' . $this->_dnsPass);
 					break;
-			case 'gandi-livedns':
-				// NOTE: quite similar to digitalocean case but with json content like azure case
-				// Get record href
-				$server = 'https://api.gandi.net/v5/livedns/domains/';
-				$url = $server . $this->_dnsDomain . '/records';
-				curl_setopt($ch, CURLOPT_HTTPHEADER, array("Authorization: Apikey {$this->_dnsPass}"));
-				curl_setopt($ch, CURLOPT_URL, $url);
-				$output = json_decode(curl_exec($ch));
-				if (!is_array($output)) {
-					$output = array();
-				}
-				foreach($output as $dnsRecord) {
-					// NS records are named @ in DO's API, so check type as well
-					if ($this->_dnsHost == $dnsRecord->rrset_name && $dnsRecord->rrset_type == 'A') {
-						$recordHref = $dnsRecord->rrset_href;
-						break;
-					}
-				}
-				$request_headers = array();
-				//$request_headers[] = 'Accept: application/json';
-				$request_headers[] = 'Authorization: Apikey ' . $this->_dnsPass;
-				$request_headers[] = 'Content-Type: application/json';
-				//create or update record
-				if ($recordHref == null) {
-					//create record
-					$url = $server . $this->_dnsDomain . '/records';
-					$body = '{"rrset_type": "A", "rrset_ttl": ' . $this->_dnsTTL . ', "rrset_name": "' . $this->_dnsHost . '", "rrset_values": ["' . $this->_dnsIP . '"]}';
-				} else {
-					//update record
-					$url = $recordHref;
-					$body = '{"rrset_ttl": ' . $this->_dnsTTL . ', "rrset_values": ["' . $this->_dnsIP . '"]}';
+				case 'gandi-livedns':
+				case 'gandi-livedns-v6':
+					// https://api.gandi.net/docs/livedns/#v5-livedns-domains-fqdn-records-rrset_name-rrset_type
+					// PUT overrides the existing record or creates if none exists
+					$gandi_api = 'https://api.gandi.net/v5/livedns/domains/';
+					$record_type = $this->_useIPv6 ? "AAAA" : "A";
+					$url = "{$gandi_api}{$this->_dnsDomain}/records/{$this->_dnsHost}/{$record_type}";
+
+					$headers = array(
+						'Authorization: Apikey ' . $this->_dnsPass,
+						'Content-Type: application/json'
+					);
+					$body = array(
+						"rrset_ttl"  => $this->_dnsTTL,
+						"rrset_values" => array($this->_dnsIP),
+					);
+
+					curl_setopt($ch, CURLOPT_URL, $url);
 					curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "PUT");
-				}
-				curl_setopt($ch, CURLOPT_URL, $url);
-				curl_setopt($ch, CURLOPT_HTTPHEADER, $request_headers);
-				curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+					curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+					curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
 					break;
 				default:
 					break;
@@ -1696,6 +1833,19 @@
 						$this->_debug($data);
 					}
 					break;
+				case 'onecom':
+				case 'onecom-v6':
+                                        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+					
+					if (($code == "200") || ($code == "204")) {
+						$status = $status_intro . $success_str . gettext("IP Address Updated Successfully!");
+						$successful_update = true;
+					} else {
+						$status = $status_intro . "(" . gettext("Unknown Response") . ": " . $code . ")";
+						log_error($status_intro . gettext("PAYLOAD:") . " " . $data);
+						$this->_debug($data);
+					}
+					break;
 				case 'citynetwork':
 					if (preg_match('/notfqdn/i', $data)) {
 						$status = $status_intro . $error_str . gettext("Not A FQDN!");
@@ -1770,8 +1920,32 @@
 				case 'dhs':
 					break;
 				case 'noip':
-				case 'noip-v6':
 				case 'noip-free':
+					if (preg_match('/good/i', $data)) {
+						$status = $status_intro . $success_str . gettext("IP Address Changed Successfully!");
+						$successful_update = true;
+					} else if (preg_match('/nochg/i', $data)) {
+						$status = $status_intro . $success_str . gettext("No Change In IP Address");
+						$successful_update = true;
+					} else if (preg_match('/nohost/i', $data)) {
+						$status = $status_intro . $error_str . gettext("Hostname supplied does not exist under specified account");
+					} else if (preg_match('/badauth/i', $data)) {
+						$status = $status_intro . $error_str . gettext("Invalid username password combination");
+					} else if (preg_match('/badagent/i', $data)) {
+						$status = $status_intro . $error_str . gettext("Client disabled");
+					} else if (preg_match('/\!donator/i', $data)) {
+						$status = $status_intro . $error_str . gettext("Feature is not available");
+					} else if (preg_match('/abuse/i', $data)) {
+						$status = $status_intro . $error_str . gettext("Username is blocked due to abuse");
+					} else if (preg_match('/911/i', $data)) {
+						$status = $status_intro . $error_str . gettext("Fatal error");
+					} else {
+						$status = $status_intro . "(" . gettext("Unknown Response") . ")";
+						log_error($status_intro . gettext("PAYLOAD:") . " {$data}");
+						$this->_debug($data);
+					}
+					break;
+				case 'noip-v6':
 				case 'noip-free-v6':
 					list($ip, $code) = explode(":", $data);
 					switch ($code) {
@@ -2019,6 +2193,17 @@
 						$this->_debug($data);
 					}
 					break;
+				case 'mythicbeasts':
+				case 'mythicbeasts-v6':
+					/* https://www.mythic-beasts.com/support/api/dnsv2/tutorial */
+					$result = json_decode($data, true);
+					if ($result['message'] == '1 records added') {
+						$status = $status_intro . $success_str . gettext("IP Address Updated Successfully!");
+						$successful_update = true;
+					} else {
+						log_error($status_intro . " ( " . gettext("Error message: ") . $result['error'] . " )");
+					}
+					break;
 				case 'namecheap':
 					$tmp = str_replace("^M", "", $data);
 					$ncresponse = @xml2array($tmp);
@@ -2034,6 +2219,26 @@
 					} else {
 						$status = $status_intro . "(" . gettext("Unknown Response") . ")";
 						log_error($status_intro . gettext("PAYLOAD:") . " " . $data);
+						$this->_debug($data);
+					}
+					break;
+				case 'nicru':
+				case 'nicru-v6':
+					$status_intro = "NIC.RU ({$this->_dnsHost}): ";
+					if (preg_match('/badauth/i', $data)) {
+						$status = $status_intro . gettext("The NIC.RU username or password specified are incorrect.");
+					} else if (preg_match('/notfqdn /i', $data)) {
+						$status = $status_intro . gettext("The hostname specified is not a fully-qualified domain name.");
+					} else if (preg_match('/nohost/i', $data)) {
+						$status = $status_intro . gettext("The hostname passed could not be matched to any records configured.");
+					} else if (preg_match('/good/i', $data)) {
+						$status = $status_intro . $success_str . gettext("IP Address Changed Successfully!") . " (" . $this->_dnsIP . ")";
+						$successful_update = true;
+					} else if (preg_match('/dnserr/i', $data)) {
+						$status = $status_intro . gettext("DNS error encountered. Stop updating for 30 minutes.");
+					} else {
+						$status = $status_intro . "(" . gettext("Unknown Response") . ")";
+						log_error($status_intro . gettext("PAYLOAD:") . " {$data}");
 						$this->_debug($data);
 					}
 					break;
@@ -2141,6 +2346,35 @@
 					} else {
 						$status = $status_intro . gettext("UNKNOWN ERROR") . " - " . $output->errors[0]->message;
 						log_error($status_intro . gettext("PAYLOAD:") . " " . $data);
+					}
+					break;
+				case 'yandex-v6':
+				case 'yandex':
+					$result = json_decode($data, true);
+					if ($result['success'] == 'ok') {
+						$successful_update = true;
+					} elseif ($result['error'] == 'bad_domain') {
+						log_error($status_intro . $error_str .  gettext("The domain name was not specified or does not conform to the RFC"));
+					} elseif ($result['error'] == 'unknown') {
+						log_error($status_intro . $error_str .  gettext("A temporary failure or API error occurred"));
+					} elseif ($result['error'] == 'prohibited') {
+						log_error($status_intro . $error_str .  gettext("A forbidden domain name"));
+					} elseif ($result['error'] == 'bad_token') {
+						log_error($status_intro . $error_str .  gettext("Invalid PDD token"));
+					} elseif ($result['error'] == 'no_auth') {
+						log_error($status_intro . $error_str .  gettext("The PddToken header was omitted"));
+					} elseif ($result['error'] == 'not_allowed') {
+						log_error($status_intro . $error_str .  gettext("This operation is not allowed for this user"));
+					} elseif ($result['error'] == 'blocked') {
+						log_error($status_intro . $error_str .  gettext("Blocked domain"));
+					} elseif ($result['error'] == 'occupied') {
+						log_error($status_intro . $error_str .  gettext("The domain name is in use by another user"));
+					} elseif ($result['error'] == 'domain_limit_reached') {
+						log_error($status_intro . $error_str .  gettext("Exceeded the acceptable number of connected domains (50)"));
+					} elseif ($result['error'] == 'no_reply') {
+						log_error($status_intro . $error_str .  gettext("Yandex.Mail for Domain cannot connect to the server source for the import"));
+					} else {
+						log_error($status_intro . $error_str .  gettext("PAYLOAD:") . " " . $data);
 					}
 					break;
 				case 'eurodns':
@@ -2457,15 +2691,11 @@
 					}
 					break;
 				case 'gandi-livedns':
-					// NOTE: same as azure
-					// Creating new records returns an HTTP 201, updating existing records get 200
+				case 'gandi-livedns-v6':
 					$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 					if ($http_code == 401) {
 						$status = $status_intro . $error_str . gettext("User Authorization Failed");
-					} else if ($http_code == 201) {
-						$status = $status_intro . $success_str . gettext("IP Address Changed Successfully!");
-						$successful_update = true;
-					} else if ($http_code == 200) {
+					} else if ($http_code == 200 || $http_code == 201) {
 						$status = $status_intro . $success_str . gettext("IP Address Changed Successfully!");
 						$successful_update = true;
 					} else {

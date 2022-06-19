@@ -24,6 +24,7 @@
 
 require_once("globals.inc");
 require_once("service-utils.inc");
+require_once("/usr/local/www/includes/functions.inc.php");
 
 if (file_exists("/cf/conf/use_xmlreader")) {
 	require_once("xmlreader.inc");
@@ -968,6 +969,7 @@ function install_package_xml($package_name) {
 		$pkg_data['include_file'] = $pkg_config['include_file'];
 	}
 	if (is_array($pkg_config['plugins']['item'])) {
+		init_config_arr(array('installedpackages', 'package', $pkgid, 'plugins', 'item'));
 		$pkg_data['plugins']['item'] = $pkg_config['plugins']['item'];
 	}
 
@@ -1575,38 +1577,39 @@ function update_repos() {
 			$platformname = $platform['descr'];
 		}
 
-		/* XXX: Use json_encode instead of hardcode it */
-		$version =
-		    "{\"platform\":\"" . $platformname .
-		    "\",\"os\":\"" . $os .
-		    "\",\"osver\":\"" . $osver .
-		    "\",\"prod\":\"" . $g['product_label'] .
-		    "\",\"ver\":\"" . $g['product_version'] .
-		    "\",\"ed\":\"" . $ed .
-		    "\",\"pkgs\":[";
-
-		$first = true;
-
-		foreach($pkglist as $pkg) {
-			if (!$first) {
-				$version .= ",";
-			}
-
-			$version .= "{\"name\":\"" . $pkg['shortname'] .
-			    "\",\"ver\":\"" . $pkg['version'] . "\"}";
-			$first = false;
-		}
-
-		$version .= "]}";
-
 		$arch =  php_uname('m');
 		$locale = $config['system']['language'];
+
+		// Find root file system type
+		$filesystems = get_mounted_filesystems();
+		$fstype = "";
+
+		foreach ($filesystems as $fs)  {
+		   if ($fs['mountpoint'] == "/") {
+		      $fstype = strtoupper($fs['type']);
+		      break;
+		   }
+		}
+
+		$va = array();
+		$va['platform'] = $platformname;
+		$va['os'] = $os;
+		$va['osver'] = $platformname;
+		$va['fstype'] = $fstype;
+		$va['prod'] = $g['product_label'];
+		$va['ver'] = $g['product_version_string'];
+		$va['ed'] = $ed;
+		$va['pkgs'] = array();
+
+		foreach($pkglist as $pkg) {
+			$va['pkgs'][] = array('name' => $pkg['shortname'], 'ver' => $pkg['version']);
+		}
 
 		$post = [
 		    'uid' => $nid,
 		    'language' => $locale,
 		    'serial' => $serial,
-		    'version' => $version,
+		    'version' => json_encode($va),
 		    'arch' => $arch
 		];
 
@@ -1614,14 +1617,16 @@ function update_repos() {
 		curl_setopt($ch, CURLOPT_HEADER, 0);
 		curl_setopt($ch, CURLOPT_VERBOSE, 0);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_USERAGENT, $g['product_label'] . '/' .
-		    $g['product_version']);
+		curl_setopt($ch, CURLOPT_USERAGENT, $g['product_label'] . '/' . $g['product_version']);
 		curl_setopt($ch, CURLOPT_URL, $FQDN);
 		curl_setopt($ch, CURLOPT_POST, true);
 		curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
 		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT ,4);
+		set_curlproxy($ch);
+
 		$response = curl_exec($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
 		curl_close($ch);
 
 		if ($status == 200) {

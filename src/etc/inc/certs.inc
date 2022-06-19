@@ -234,7 +234,7 @@ function ca_create(& $ca, $keylen, $lifetime, $dn, $digest_alg = "sha256", $keyt
 	}
 
 	// self sign the certificate
-	$res_crt = openssl_csr_sign($res_csr, null, $res_key, $lifetime, $args);
+	$res_crt = openssl_csr_sign($res_csr, null, $res_key, $lifetime, $args, cert_get_random_serial());
 	if (!$res_crt) {
 		return false;
 	}
@@ -386,7 +386,7 @@ function cert_create(& $cert, $caref, $keylen, $lifetime, $dn, $type = "user", $
 		$ca           = null;
 		$ca_res_crt   = null;
 		$ca_res_key   = $res_key;
-		$ca_serial    = 0;
+		$ca_serial    = cert_get_random_serial();
 		$cert['type'] = "server";
 	}
 
@@ -707,8 +707,12 @@ function cert_format_date($validTS, $validTS_time_t, $outputstring = true) {
 
 	/* Try to create a DateTime object from the full time string */
 	$date = DateTime::createFromFormat('ymdHis', rtrim($validTS, 'Z'), new DateTimeZone('Z'));
-	/* If that failed, try to create it from the UNIX timestamp */
+	/* If that failed, try using a four digit year */
 	if ($date === false) {
+		$date = DateTime::createFromFormat('YmdHis', rtrim($validTS, 'Z'), new DateTimeZone('Z'));
+	}
+	/* If that failed, try to create it from the UNIX timestamp */
+	if (($date === false) && (!empty($validTS_time_t))) {
 		$date = new DateTime('@' . $validTS_time_t, new DateTimeZone('Z'));
 	}
 	/* If we have a valid DateTime object, format it in a nice way */
@@ -918,6 +922,15 @@ function is_captiveportal_cert($certref) {
 	return false;
 }
 
+function is_unbound_cert($certref) {
+	global $config;
+	if (($config['unbound']['sslcertref'] == $certref) &&
+	    isset($config['unbound']['enablessl']) &&
+	    isset($config['unbound']['enable'])) {
+		return true;
+	}
+}
+
 function cert_in_use($certref) {
 
 	return (is_webgui_cert($certref) ||
@@ -926,6 +939,7 @@ function cert_in_use($certref) {
 		is_openvpn_client_cert($certref) ||
 		is_ipsec_cert($certref) ||
 		is_captiveportal_cert($certref) ||
+		is_unbound_cert($certref) ||
 		is_package_cert($certref));
 }
 
@@ -1235,10 +1249,29 @@ function cert_generate_serial() {
 function ca_has_serial($caref, $serial) {
 	global $config;
 
+	/* Check certs first -- more likely to find a hit */
 	foreach ($config['cert'] as $cert) {
 		if (($cert['caref'] == $caref) &&
 		    (cert_get_serial($cert['crt'], true) == $serial)) {
 			/* If this certificate is issued by the CA in question
+			 * and has a matching serial number, stop processing
+			 * and return true. */
+			return true;
+		}
+	}
+
+	/* Check the CA iteself */
+	$this_ca = lookup_ca($caref);
+	$this_serial = cert_get_serial($this_ca['crt'], true);
+	if ($serial == $this_serial) {
+		return true;
+	}
+
+	/* Check other CAs for a match (intermediates signed by this CA) */
+	foreach ($config['ca'] as $ca) {
+		if (($ca['caref'] == $caref) &&
+		    (cert_get_serial($ca['crt'], true) == $serial)) {
+			/* If this CA is issued by the CA in question
 			 * and has a matching serial number, stop processing
 			 * and return true. */
 			return true;
@@ -1257,7 +1290,7 @@ function ca_has_serial($caref, $serial) {
  *   Random serial number which is not in use by any known certificate in a CA
  ******/
 
-function cert_get_random_serial($caref) {
+function cert_get_random_serial($caref = '') {
 	/* Number of attempts to generate a usable serial. Multiple attempts
 	 *  are necessary to ensure that the number is usable and unique. */
 	$attempts = 10;
@@ -1550,7 +1583,7 @@ $cert_strict_values = array(
  ******/
 
 function cert_renew(& $cert, $reusekey = true, $strictsecurity = false) {
-	global $cert_strict_values, $cert_curve_compatible;
+	global $cert_strict_values, $cert_curve_compatible, $curve_compatible_list;
 
 	/* If there is no certificate or private key string, this entry is either
 	 *  invalid or cannot be renewed by this function. */
@@ -1568,6 +1601,7 @@ function cert_renew(& $cert, $reusekey = true, $strictsecurity = false) {
 
 	$subj = cert_get_subject($cert['crt']);
 	$issuer = cert_get_issuer($cert['crt']);
+	$purpose = cert_get_purpose($cert['crt']);
 
 	$res_key = openssl_pkey_get_private(base64_decode($cert['prv']));
 	$key_details = openssl_pkey_get_details($res_key);
@@ -1602,21 +1636,18 @@ function cert_renew(& $cert, $reusekey = true, $strictsecurity = false) {
 		/* If a serial value is present, this must be a CA */
 		$cert['type'] = 'ca';
 	} elseif (empty($cert['type'])) {
-		/* Assume server certificate if empty & non-CA (e.g. self-signed) */
-		$cert['type'] = 'server';
+		/* Automatically determine certificate type if unset based on purpose value */
+		$cert['type'] = ($purpose['server'] == 'Yes') ? 'server' : 'user';
 	}
 
 	/* Convert the internal certificate type to an openssl.cnf section name */
 	$cert_type = cert_type_config_section($cert['type']);
-	if ($cert['type'] != 'ca') {
-		$cert_type .= '_san';
-	}
 
 	/* Reuse lifetime (convert seconds to days) */
 	$lifetime = (int) round(($cert_details['validTo_time_t'] - $cert_details['validFrom_time_t']) / 86400);
 
 	/* If we are enforcing strict security, then cap the lifetime for server certificates */
-	if (($cert_type == 'server_san') && $strictsecurity &&
+	if (($cert_type == 'server') && $strictsecurity &&
 	    ($lifetime > $cert_strict_values['max_server_cert_lifetime'])) {
 		$lifetime = $cert_strict_values['max_server_cert_lifetime'];
 	}
@@ -1627,9 +1658,16 @@ function cert_renew(& $cert, $reusekey = true, $strictsecurity = false) {
 		$sans = cert_add_altname_type($dn['commonName']);
 	}
 
-	/* subjectAltName can be set _only_ via configuration file, so put the
-	 * value into the environment where it will be read from the configuration */
-	putenv("SAN={$sans}");
+	/* Do not setup SANs if the SAN list is empty (e.g. no SAN list and/or
+	 * CN cannot be mapped to a valid SAN type) */
+	if (!empty($sans)) {
+		if ($cert['type'] != 'ca') {
+			$cert_type .= '_san';
+		}
+		/* subjectAltName can be set _only_ via configuration file, so put the
+		 * value into the environment where it will be read from the configuration */
+		putenv("SAN={$sans}");
+	}
 
 	/* If we are enforcing strict security, then check the digest against a
 	 * blacklist of insecure digest methods. */
@@ -1718,7 +1756,8 @@ function cert_renew(& $cert, $reusekey = true, $strictsecurity = false) {
 		 */
 		$ca_res_crt   = null;
 		$ca_res_key   = $res_key;
-		$ca_serial    = 0; /* TODO: Check if we should increment from previous */
+		/* Use random serial from this CA/Self-Signed Cert */
+		$ca_serial    = cert_get_random_serial($cert['refid']);
 	}
 
 	/* Sign the CSR */
@@ -2136,23 +2175,26 @@ function cert_print_infoblock($cert) {
 	/* Private key information */
 	if (!empty($cert['prv'])) {
 		$res_key = openssl_pkey_get_private(base64_decode($cert['prv']));
-		$key_details = openssl_pkey_get_details($res_key);
-
-		/* Key type (RSA or EC) */
 		$certextinfo .= '<b>' . gettext("Key Type: ") . '</b> ';
-		if ($key_details['type'] == OPENSSL_KEYTYPE_RSA) {
-			/* RSA Key size */
-			$certextinfo .= 'RSA<br/>';
-			$certextinfo .= '<b>' . gettext("Key Size: ") . '</b> ';
-			$certextinfo .= $key_details['bits'] . '<br/>';
-		} else {
-			/* Elliptic curve (EC) key curve name */
-			$certextinfo .= 'ECDSA<br/>';
-			$curve = cert_get_pkey_curve($cert['prv']);
-			if (!empty($curve)) {
-				$certextinfo .= '<b>' . gettext("Elliptic curve name:") . ' </b>';
-				$certextinfo .= $curve . '<br/>';
+		if ($res_key) {
+			$key_details = openssl_pkey_get_details($res_key);
+			/* Key type (RSA or EC) */
+			if ($key_details['type'] == OPENSSL_KEYTYPE_RSA) {
+				/* RSA Key size */
+				$certextinfo .= 'RSA<br/>';
+				$certextinfo .= '<b>' . gettext("Key Size: ") . '</b> ';
+				$certextinfo .= $key_details['bits'] . '<br/>';
+			} else {
+				/* Elliptic curve (EC) key curve name */
+				$certextinfo .= 'ECDSA<br/>';
+				$curve = cert_get_pkey_curve($cert['prv']);
+				if (!empty($curve)) {
+					$certextinfo .= '<b>' . gettext("Elliptic curve name:") . ' </b>';
+					$certextinfo .= $curve . '<br/>';
+				}
 			}
+		} else {
+			$certextinfo .= '<i>' . gettext("Unknown (Key could not be parsed)") . '</i><br/>';
 		}
 	}
 
@@ -2186,16 +2228,18 @@ function cert_print_infoblock($cert) {
 
 	/* Total Lifetime (days from cert start to end) */
 	$lifetime = cert_get_lifetime($cert);
-	$certextinfo .= '<b>' . gettext("Total Lifetime: ") . '</b> ';
-	$certextinfo .= sprintf("%d %s", $lifetime, (abs($lifetime) == 1) ? gettext('day') : gettext('days'));
-	$certextinfo .= '<br/>';
+	if ($lifetime !== false) {
+		$certextinfo .= '<b>' . gettext("Total Lifetime: ") . '</b> ';
+		$certextinfo .= sprintf("%d %s", $lifetime, (abs($lifetime) == 1) ? gettext('day') : gettext('days'));
+		$certextinfo .= '<br/>';
 
-	/* Lifetime before certificate expires (days from now to end) */
-	$expiredays = cert_get_lifetime($cert, true);
-	list($lrclass, $expstring) = cert_analyze_lifetime($expiredays);
-	$certextinfo .= '<b>' . gettext("Lifetime Remaining: ") . '</b> ';
-	$certextinfo .= "<span class=\"text-{$lrclass}\">{$expstring}</span>";
-	$certextinfo .= '<br/>';
+		/* Lifetime before certificate expires (days from now to end) */
+		$expiredays = cert_get_lifetime($cert, true);
+		list($lrclass, $expstring) = cert_analyze_lifetime($expiredays);
+		$certextinfo .= '<b>' . gettext("Lifetime Remaining: ") . '</b> ';
+		$certextinfo .= "<span class=\"text-{$lrclass}\">{$expstring}</span>";
+		$certextinfo .= '<br/>';
+	}
 
 	if ($purpose['ca'] == 'Yes') {
 		/* CA Trust store presence */

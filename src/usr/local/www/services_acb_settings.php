@@ -66,7 +66,7 @@ if (isset($_POST['save'])) {
 	}
 
 	if ($_POST['frequency'] === 'cron') {
-		if (!preg_match('/^[0-9\*\/\-\,]+$/', $_POST['hours'] . $_POST['day'] . $_POST['month'] . $_POST['dow']))  {
+		if (!preg_match('/^[0-9\*\/\-\,]+$/', $_POST['minute'] . $_POST['hour'] . $_POST['day'] . $_POST['month'] . $_POST['dow']))  {
 			$input_errors[] = gettext("Schedule values may only contain 0-9 - , / *");
 		}
 	}
@@ -86,7 +86,8 @@ if (isset($_POST['save'])) {
 			$pconfig['enable'],
 			$pconfig['hint'],
 			$pconfig['frequency'],
-			$pconfig['hours'],
+			$pconfig['minute'],
+			$pconfig['hour'],
 			$pconfig['month'],
 			$pconfig['day'],
 			$pconfig['dow'],
@@ -140,14 +141,20 @@ $group->add(new Form_MultiCheckbox(
 $group->addClass("notoggleall");
 $section->add($group);
 
-
 $group = new Form_Group("Schedule");
 
 $group->add(new Form_Input(
-	'hours',
+	'minute',
+	'Minute',
+	'text',
+	(isset($pconfig['minute']) ? $pconfig['minute'] : strval(random_int(0,59)))
+))->setHelp("Minute (0-59)");
+
+$group->add(new Form_Input(
+	'hour',
 	'Hour',
 	'text',
-	(isset($pconfig['hours']) ? $pconfig['hours']:'0')
+	(isset($pconfig['hour']) ? $pconfig['hour']:'0')
 ))->setHelp("Hours (0-23)");
 
 $group->add(new Form_Input(
@@ -172,7 +179,7 @@ $group->add(new Form_Input(
 ))->setHelp("Day of week (0-6)");
 
 $group->addClass("cronsched");
-$group->setHelp(sprintf('Use * ("every"), divisor or exact value.  Minutes are fixed at 0. See %s for more information.',
+$group->setHelp(sprintf('Use * ("every"), divisor or exact value.  Minutes are randomly chosen by default. See %s for more information.',
 	'<a href="https://www.freebsd.org/cgi/man.cgi?crontab(5)" target="_blank">Cron format</a>'));
 $section->add($group);
 

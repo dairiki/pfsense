@@ -678,6 +678,7 @@ function step12_submitphpaction() {
 
 		$server['netbios_enable'] = $pconfig['step10']['nbtenable'];
 	}
+	$server['exit_notify'] = 1;
 
 	$tracker = (int)microtime(true);
 	if (isset($pconfig['step11']['ovpnrule'])) {
@@ -733,4 +734,13 @@ function step12_submitphpaction() {
 	exit;
 }
 
+function openvpn_wizard_build_if_list() {
+	$list = array();
+
+	foreach (openvpn_build_if_list() as $iface => $ifacename) {
+	   $list[] = array("name" => $ifacename, "value" => $iface);
+	}
+
+	return($list);
+}
 ?>

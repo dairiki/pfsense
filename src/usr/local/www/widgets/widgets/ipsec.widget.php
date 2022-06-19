@@ -49,7 +49,7 @@ if ($_REQUEST && $_REQUEST['ajax']) {
 
 		if (isset($config['ipsec']['phase2']) && is_array($config['ipsec']['phase2'])) {
 			foreach ($config['ipsec']['phase2'] as $ph2ent) {
-				if (!ipsec_lookup_phase1($ph2ent,$ph1ent)) {
+				if (!ipsec_lookup_phase1($ph2ent, $ph1ent)) {
 					continue;
 				}
 
@@ -68,18 +68,29 @@ if ($_REQUEST && $_REQUEST['ajax']) {
 						$ikenum[$ph1ent['ikeid']]++;
 					}
 
-					$ikeid = "con{$ph1ent['ikeid']}00" . $ikenum[$ph1ent['ikeid']];
-				} else {
-					if (isset($ikenum[$ph1ent['ikeid']])) {
-						continue;
+					if (get_ipsecifnum($ph1ent['ikeid'], $ikenum[$ph1ent['ikeid']])) {
+						$ikeid = "con" . get_ipsecifnum($ph1ent['ikeid'], $ikenum[$ph1ent['ikeid']]);
+					} else {
+						$ikeid = "con{$ph1ent['ikeid']}00000";
 					}
-
-					$ikeid = "con{$ph1ent['ikeid']}000";
+				} else {
+					if (get_ipsecifnum($ph1ent['ikeid'], 0)) {
+						$ikeid = "con" . get_ipsecifnum($ph1ent['ikeid'], 0);
+					} else {
+						$ikeid = "con{$ph1ent['ikeid']}00000";
+					}
 					$ikenum[$ph1ent['ikeid']] = true;
 				}
 
+				if (!is_array($ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]) ||
+				    ($ph1ent['iketype'] == 'ikev1') || isset($ph1ent['splitconn'])) {
+					$allow_count = true;
+				} else {
+					$allow_count = false;
+				}
+
 				$found = false;
-				if(is_array($ipsec_status) && !empty($ipsec_status)){
+				if (is_array($ipsec_status) && !empty($ipsec_status) && $allow_count) { 
 					foreach ($ipsec_status as $id => $ikesa) {
 						if (isset($ikesa['child-sas'])) {
 							foreach ($ikesa['child-sas'] as $childid => $childsa) {
@@ -89,7 +100,7 @@ if ($_REQUEST && $_REQUEST['ajax']) {
 									break;
 								}
 							}
-						} else if ($ikeid == $ikesa['con-id']) {
+						} elseif ($ikeid == $ikesa['con-id']) {
 							$found = true;
 						}
 
@@ -108,17 +119,33 @@ if ($_REQUEST && $_REQUEST['ajax']) {
 					}
 				}
 
-				if ($found === false) {
+				if (($found == false) && $allow_count) {
 					/* tunnel is down */
 					$iconfn = "false";
 					$inactivecounter++;
 				}
 
-				$ipsec_detail_array[] = array('src' => convert_friendly_interface_to_friendly_descr($ph1ent['interface']),
+				if (!is_array($ipsec_detail_array[$ikenum[$ph1ent['ikeid']]])) {
+					$ipsec_detail_array[$ikenum[$ph1ent['ikeid']]] = array(
+						'src' => convert_friendly_interface_to_friendly_descr($ph1ent['interface']),
+						'local-subnet' => array(),
 						'dest' => $ph1ent['remote-gateway'],
-						'remote-subnet' => ipsec_idinfo_to_text($ph2ent['remoteid']),
+						'remote-subnet' => array(),
 						'descr' => $ph2ent['descr'],
+						'total-subnets' => 0,
 						'status' => $iconfn);
+				}
+				$ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]['total-subnets'] += 1;
+				if ($ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]['total-subnets'] < 6) {
+					$ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]['local-subnet'][] =
+						ipsec_idinfo_to_text($ph2ent['localid']);
+					$ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]['remote-subnet'][] =
+						ipsec_idinfo_to_text($ph2ent['remoteid']);
+				} else {
+					$others = $ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]['total-subnets'] - 4;
+					$ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]['local-subnet'][4] = "+ {$others} others";
+					$ipsec_detail_array[$ikenum[$ph1ent['ikeid']]]['remote-subnet'][4] = "+ {$others} others";
+				}
 			}
 		}
 		unset($ikenum);
@@ -139,11 +166,11 @@ if ($_REQUEST && $_REQUEST['ajax']) {
 	$data->overview .= "</tr>";
 
 	$data->tunnel = "";
-	if(is_array($ipsec_detail_array) && !empty($ipsec_detail_array)){
+	if (is_array($ipsec_detail_array) && !empty($ipsec_detail_array)) {
 		foreach ($ipsec_detail_array as $ipsec) {
 			$data->tunnel .= "<tr>";
-			$data->tunnel .= "<td>" . htmlspecialchars($ipsec['src']) . "</td>";
-			$data->tunnel .= "<td>" . $ipsec['remote-subnet'] . "<br />(" . htmlspecialchars($ipsec['dest']) . ")</td>";
+			$data->tunnel .= "<td>" . implode('<br/>', $ipsec['local-subnet']) . "<br />(" . htmlspecialchars($ipsec['src']) . ")</td>";
+			$data->tunnel .= "<td>" . implode('<br/>', $ipsec['remote-subnet']) . "<br />(" . htmlspecialchars($ipsec['dest']) . ")</td>";
 			$data->tunnel .= "<td>" . htmlspecialchars($ipsec['descr']) . "</td>";
 			if ($ipsec['status'] == "true") {
 				$data->tunnel .= '<td><i class="fa fa-arrow-up text-success"></i></td>';

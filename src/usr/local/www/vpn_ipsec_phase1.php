@@ -125,11 +125,8 @@ if (isset($p1index) && $a_phase1[$p1index]) {
 		$pconfig['gw_duplicates'] = true;
 	}
 
+	$pconfig['startaction'] = $a_phase1[$p1index]['startaction'];
 	$pconfig['closeaction'] = $a_phase1[$p1index]['closeaction'];
-
-	if (isset($a_phase1[$p1index]['responderonly'])) {
-		$pconfig['responderonly'] = true;
-	}
 
 	if ($a_phase1[$p1index]['dpd_delay'] && $a_phase1[$p1index]['dpd_maxfail']) {
 		$pconfig['dpd_enable'] = true;
@@ -296,6 +293,13 @@ if ($_POST['save']) {
 		$input_errors[] = gettext("Rand Time must be an integer.");
 	}
 
+	if (!empty($pconfig['startaction']) && !array_key_exists($pconfig['startaction'], $ipsec_startactions)) {
+		$input_errors[] = gettext("Invalid Child SA Start Action.");
+	} elseif ($pconfig['mobile'] && !empty($pconfig['startaction'])) {
+		/* Start action cannot be set for mobile tunnels */
+		$input_errors[] = gettext("Child SA Start Action cannot be set for Mobile Phase 1 entries.");
+	}
+
 	if (!empty($pconfig['closeaction']) && !array_key_exists($pconfig['closeaction'], $ipsec_closeactions)) {
 		$input_errors[] = gettext("Invalid Child SA Close Action.");
 	}
@@ -330,14 +334,15 @@ if ($_POST['save']) {
 		$input_errors[] = gettext("IKE and NAT-T port numbers must be different.");
 	}
 
-	if ($pconfig['remotegw'] && is_ipaddr($pconfig['remotegw']) && !isset($pconfig['disabled'])) {
+	if ($pconfig['remotegw'] && !isset($pconfig['disabled'])) {
 		$t = 0;
 		foreach ($a_phase1 as $ph1tmp) {
 			if ($p1index != $t) {
 				$tremotegw = $pconfig['remotegw'];
 				if (($ph1tmp['remote-gateway'] == $tremotegw) && ($ph1tmp['remote-gateway'] != '0.0.0.0') &&
 				    ($ph1tmp['remote-gateway'] != '::') && !isset($ph1tmp['disabled']) &&
-				    (!isset($pconfig['gw_duplicates']) || !isset($ph1tmp['gw_duplicates']))) {
+				    (!isset($pconfig['gw_duplicates']) || !isset($ph1tmp['gw_duplicates']) ||
+			    	    !is_ipaddr($tremotegw))) {
 					$input_errors[] = sprintf(gettext('The remote gateway "%1$s" is already used by phase1 "%2$s".'), $tremotegw, $ph1tmp['descr']);
 				}
 			}
@@ -346,28 +351,13 @@ if ($_POST['save']) {
 	}
 
 	if (($pconfig['remotegw'] == '0.0.0.0') || ($pconfig['remotegw'] == '::')) {
-		if (!isset($pconfig['responderonly'])) {
-			$input_errors[] = gettext('The remote gateway "0.0.0.0" or "::" address can only be used with "Responder Only".');
+		if ($pconfig['startaction'] != 'none') {
+			$input_errors[] = gettext('The remote gateway "0.0.0.0" or "::" address can only be used with a Child SA Start Action of "None (Responder Only)".');
 		}
 		if ($pconfig['peerid_type'] == "peeraddress") {
 			$input_errors[] = gettext('The remote gateway "0.0.0.0" or "::" address can not be used with IP address peer identifier.');
 		}
 
-	}
-
-	if (($pconfig['iketype'] == "ikev1") && is_array($a_phase2) && (count($a_phase2))) {
-		foreach ($a_phase2 as $phase2) {
-			if ($phase2['ikeid'] == $pconfig['ikeid']) {
-				if (($pconfig['protocol'] == "inet") && ($phase2['mode'] == "tunnel6")) {
-					$input_errors[] = gettext("There is a Phase 2 using IPv6, cannot use IPv4.");
-					break;
-				}
-				if (($pconfig['protocol'] == "inet6") && ($phase2['mode'] == "tunnel")) {
-					$input_errors[] = gettext("There is a Phase 2 using IPv4, cannot use IPv6.");
-					break;
-				}
-			}
-		}
 	}
 
 	/* My identity */
@@ -610,18 +600,13 @@ if ($_POST['save']) {
 			unset($ph1ent['gw_duplicates']);
 		}
 
+		$ph1ent['startaction'] = $pconfig['startaction'];
 		$ph1ent['closeaction'] = $pconfig['closeaction'];
 
 		if (isset($pconfig['prfselect_enable'])) {
 			$ph1ent['prfselect_enable'] = 'yes';
 		} else {
 			unset($ph1ent['prfselect_enable']);
-		}
-
-		if (isset($pconfig['responderonly'])) {
-			$ph1ent['responderonly'] = true;
-		} else {
-			unset($ph1ent['responderonly']);
 		}
 
 		if (isset($pconfig['dpd_enable'])) {
@@ -827,28 +812,11 @@ if (!$pconfig['mobile']) {
 		$pconfig['remotegw']
 	))->setHelp('Enter the public IP address or host name of the remote gateway.%1$s%2$s%3$s',
 	    '<div class="infoblock">',
-	    sprint_info_box(gettext('Use \'0.0.0.0\' to allow connections from any IPv4 address or \'::\' ' . 
-	    'to allow connections from any IPv6 address.' . '<br/>' . 'Responder Only must be set and ' . 
+	    sprint_info_box(gettext('Use \'0.0.0.0\' to allow connections from any IPv4 address or \'::\' ' .
+	    'to allow connections from any IPv6 address.' . '<br/>' . 'Child SA Start Action must be set to None and ' .
 	    'Peer IP Address cannot be used for Remote Identifier.'), 'info', false),
 	    '</div>');
-	$group->add(new Form_Input(
-	    'ikeport',
-	    'Remote IKE Port',
-	    'number',
-	    $pconfig['ikeport'],
-	    ['min' => 1, 'max' => 65535]
-	))->setHelp('UDP port for IKE on the remote gateway. Leave empty for default automatic behavior (500/4500).');
-	$group->add(new Form_Input(
-	    'nattport',
-	    'Remote NAT-T Port',
-	    'number',
-	    $pconfig['nattport'],
-	    ['min' => 1, 'max' => 65535]
-	))->setHelp('UDP port for NAT-T on the remote gateway.%1$s%2$s%3$s',
-	    '<div class="infoblock">',
-	    sprint_info_box(gettext('If the IKE port is empty and NAT-T contains a value, the tunnel will use only NAT-T.'),
-	    'info', false),
-	    '</div>');
+
 	$section->add($group);
 }
 
@@ -1077,12 +1045,14 @@ $form->add($section);
 
 $section = new Form_Section('Advanced Options');
 
-$section->addInput(new Form_Checkbox(
-	'responderonly',
-	'Responder Only',
-	'Enable this option to never initiate this connection from this side, only respond to incoming requests.',
-	$pconfig['responderonly']
-));
+if (!$pconfig['mobile']) {
+	$section->addInput(new Form_Select(
+		'startaction',
+		'Child SA Start Action',
+		$pconfig['startaction'],
+		$ipsec_startactions
+	))->setHelp('Set this option to force specific initiation/responder behavior for child SA (P2) entries');
+}
 
 $section->addInput(new Form_Select(
 	'closeaction',
@@ -1128,6 +1098,29 @@ $section->addInput(new Form_Checkbox(
 	'Enable manual Pseudo-Random Function (PRF) selection',
 	$pconfig['prfselect_enable']
 ))->setHelp('Manual PRF selection is typically not required, but can be useful in combination with AEAD Encryption Algorithms such as AES-GCM');
+
+$group = new Form_Group('Custom IKE/NAT-T Ports');
+
+$group->add(new Form_Input(
+    'ikeport',
+    'Remote IKE Port',
+    'number',
+    $pconfig['ikeport'],
+    ['min' => 1, 'max' => 65535]
+))->setHelp('UDP port for IKE on the remote gateway. Leave empty for default automatic behavior (500/4500).');
+$group->add(new Form_Input(
+    'nattport',
+    'Remote NAT-T Port',
+    'number',
+    $pconfig['nattport'],
+    ['min' => 1, 'max' => 65535]
+))->setHelp('UDP port for NAT-T on the remote gateway.%1$s%2$s%3$s',
+    '<div class="infoblock">',
+    sprint_info_box(gettext('If the IKE port is empty and NAT-T contains a value, the tunnel will use only NAT-T.'),
+    'info', false),
+    '</div>');
+
+$section->add($group);
 
 /* FreeBSD doesn't yet have TFC support. this is ready to go once it does
 https://redmine.pfsense.org/issues/4688
