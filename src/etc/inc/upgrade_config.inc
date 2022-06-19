@@ -6358,7 +6358,18 @@ function upgrade_212_to_213() {
 			$ph1ent['lifetime'] = $ph1ent['over_time'] + max($ph1ent['rekey_time'], $ph1ent['reauth_time']);
 		}
 
-		unset($ph1ent['reauth_enable'], $ph1ent['rekey_enable'], $ph1ent['margintime'], $ph1ent['over_time']);
+		if (isset($ph1ent['reauth_enable'])) {
+			unset($ph1ent['reauth_enable']);
+		}
+		if (isset($ph1ent['rekey_enable'])) {
+			unset($ph1ent['rekey_enable']);
+		}
+		if (isset($ph1ent['margintime'])) {
+			unset($ph1ent['margintime']);
+		}
+		if (isset($ph1ent['over_time'])) {
+			unset($ph1ent['over_time']);
+		}
 	}
 }
 
@@ -6368,6 +6379,74 @@ function upgrade_213_to_214() {
 
 	if (isset($config['vxlans'])) {
 		unset($config['vxlans']);
+	}
+}
+
+/* WireGuard support was removed */
+function upgrade_214_to_215() {
+	global $config;
+
+	if (isset($config['wireguard'])) {
+		unset($config['wireguard']);
+	}
+}
+
+/* Fix VTI interface numbers */
+function upgrade_215_to_216() {
+	global $config;
+
+	init_config_arr(array('ipsec', 'vtimaps', 'item'));
+
+	if (count($config['ipsec']['vtimaps']['item']) == 0) {
+		return;
+	}
+
+	$iflist = get_configured_interface_list_by_realif(true);
+
+	foreach ($config['ipsec']['vtimaps']['item'] as $idx => $vtimap) {
+		if ($vtimap['ifnum'] <= 32767) {
+			continue;
+		}
+
+		$new_vtimap = ipsec_create_vtimap($vtimap['reqid'],
+		    $vtimap['index']);
+
+		/*
+		 * NULL means 32767 limit was reached.  It should never hit
+		 * this
+		 */
+		if ($new_vtimap == NULL) {
+			break;
+		}
+
+		$old_if = 'ipsec' . $vtimap['ifnum'];
+
+		/* Interface is assigned */
+		if (isset($iflist[$old_if])) {
+			$config['interfaces'][$iflist[$old_if]]['if'] =
+			    'ipsec' . $new_vtimap['ifnum'];
+		}
+
+		$config['ipsec']['vtimaps']['item'][$idx] = $new_vtimap;
+	}
+}
+
+/*
+ * Child SA Start Action has replaced the Responder Only option. Update P1
+ * to match.
+ * https://redmine.pfsense.org/issues/11576
+ */
+function upgrade_216_to_217() {
+	global $config;
+	init_config_arr(array('ipsec', 'phase1'));
+	foreach ($config['ipsec']['phase1'] as & $ph1ent) {
+		if (empty($ph1ent)) {
+			continue;
+		}
+		if (isset($ph1ent['responderonly'])) {
+			$ph1ent['startaction'] = 'none';
+			unset($ph1ent['responderonly']);
+		}
 	}
 }
 

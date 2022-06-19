@@ -6,6 +6,7 @@ databases/php74-pdo_mysql
 databases/php74-pgsql
 devel/aws-sdk-php
 devel/gdb
+devel/git
 dns/%%PRODUCT_NAME%%-pkg-bind
 dns/dnstop
 editors/nano
@@ -49,6 +50,7 @@ net/%%PRODUCT_NAME%%-pkg-pfBlockerNG
 net/%%PRODUCT_NAME%%-pkg-pfBlockerNG-devel
 net/%%PRODUCT_NAME%%-pkg-pimd
 net/%%PRODUCT_NAME%%-pkg-siproxd
+net/%%PRODUCT_NAME%%-pkg-WireGuard
 net/hping
 net/mosh
 net/py-speedtest-cli
@@ -66,11 +68,10 @@ security/%%PRODUCT_NAME%%-pkg-suricata
 security/%%PRODUCT_NAME%%-pkg-tinc
 security/%%PRODUCT_NAME%%-pkg-zeek
 security/%%PRODUCT_NAME%%
-sysutils/%%PRODUCT_NAME%%-builder
 sysutils/%%PRODUCT_NAME%%-pkg-Backup
 sysutils/%%PRODUCT_NAME%%-pkg-Cron
 sysutils/%%PRODUCT_NAME%%-pkg-LCDproc
-sysutils/%%PRODUCT_NAME%%-pkg-Netgate_Coreboot_Upgrade
+sysutils/%%PRODUCT_NAME%%-pkg-Netgate_Firmware_Upgrade
 sysutils/%%PRODUCT_NAME%%-pkg-Notes
 sysutils/%%PRODUCT_NAME%%-pkg-RRD_Summary
 sysutils/%%PRODUCT_NAME%%-pkg-Service_Watchdog

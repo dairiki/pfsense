@@ -87,7 +87,7 @@ $a_gateways = &$config['gateways']['gateway_item'];
 $interfaces = get_configured_interface_with_descr();
 /* Interfaces which have addresses configured elsewhere and should not be
  * configured here. See https://redmine.pfsense.org/issues/8687 */
-$no_address_interfaces = array("ovpn", "ipsec", "gif", "gre", "wg");
+$no_address_interfaces = array("ovpn", "ipsec", "gif", "gre");
 $show_address_controls = true;
 $realifname = get_real_interface($if);
 foreach ($no_address_interfaces as $ifbl) {
@@ -425,6 +425,12 @@ if (isset($wancfg['wireless'])) {
 		$pconfig['rsn_preauth'] = isset($wancfg['wireless']['wpa']['rsn_preauth']);
 		$pconfig['ext_wpa_sw'] = $wancfg['wireless']['wpa']['ext_wpa_sw'];
 		$pconfig['wpa_enable'] = isset($wancfg['wireless']['wpa']['enable']);
+		$pconfig['wpa_eap_client_mode'] = $wancfg['wireless']['wpa']['wpa_eap_client_mode'];
+		$pconfig['wpa_eap_inner_auth'] = $wancfg['wireless']['wpa']['wpa_eap_inner_auth'];
+		$pconfig['wpa_eap_inner_id'] = $wancfg['wireless']['wpa']['wpa_eap_inner_id'];
+		$pconfig['wpa_eap_inner_password'] = base64_decode($wancfg['wireless']['wpa']['wpa_eap_inner_password']);
+		$pconfig['wpa_eap_cert'] = $wancfg['wireless']['wpa']['wpa_eap_cert'];
+		$pconfig['wpa_eap_ca'] = $wancfg['wireless']['wpa']['wpa_eap_ca'];
 	}
 
 	$pconfig['mac_acl'] = $wancfg['wireless']['mac_acl'];
@@ -575,8 +581,8 @@ if ($_POST['apply']) {
 		}
 
 		if ((strlen(trim($_POST['descr'])) > 25) && ((substr($realifname, 0, 4) == 'ovpn') ||
-		    (substr($realifname, 0, 5) == 'ipsec') || (substr($realifname, 0, 2) == 'wg'))) {
-			$input_errors[] = gettext("VTI, WireGuard, and OpenVPN interface descriptions must be less than 26 characters long.");
+		    (substr($realifname, 0, 5) == 'ipsec'))) {
+			$input_errors[] = gettext("The OpenVPN and VTI interface description must be less than 26 characters long.");
 		}
 
 		if ((strlen(trim($_POST['descr'])) > 22) && ((substr($realifname, 0, 3) == 'gif') ||
@@ -1058,6 +1064,17 @@ if ($_POST['apply']) {
 		if ($_POST['wpa_enable'] == "yes") {
 			if (empty($_POST['passphrase']) && stristr($_POST['wpa_key_mgmt'], "WPA-PSK")) {
 				$input_errors[] = gettext("A WPA Passphrase must be specified when WPA PSK is enabled.");
+			}
+			if (($_POST['mode'] == 'bss') & ($_POST['wpa_key_mgmt'] == "WPA-EAP") &&
+			    ($_POST['wpa_eap_client_mode'] != 'tls')) {
+				if (empty($_POST['wpa_eap_inner_id'])) {
+					$input_errors[] = gettext("An Inner Authentication Identity must be specified " .
+					    "when PEAP/TTLS authentication method is selected.");
+				}
+				if (empty($_POST['wpa_eap_inner_password'])) {
+					$input_errors[] = gettext("An Inner Authentication Passphrase must be specified " .
+					    "when PEAP/TTLS authentication method is selected.");
+				}
 			}
 		}
 	}
@@ -1674,6 +1691,12 @@ function handle_wireless_post() {
 	$wancfg['wireless']['wpa']['wpa_gmk_rekey'] = $_POST['wpa_gmk_rekey'];
 	$wancfg['wireless']['wpa']['passphrase'] = $_POST['passphrase'];
 	$wancfg['wireless']['wpa']['ext_wpa_sw'] = $_POST['ext_wpa_sw'];
+	$wancfg['wireless']['wpa']['wpa_eap_client_mode'] = $_POST['wpa_eap_client_mode'];
+	$wancfg['wireless']['wpa']['wpa_eap_inner_auth'] = $_POST['wpa_eap_inner_auth'];
+	$wancfg['wireless']['wpa']['wpa_eap_inner_id'] = $_POST['wpa_eap_inner_id'];
+	$wancfg['wireless']['wpa']['wpa_eap_inner_password'] = base64_encode($_POST['wpa_eap_inner_password']);
+	$wancfg['wireless']['wpa']['wpa_eap_cert'] = $_POST['wpa_eap_cert'];
+	$wancfg['wireless']['wpa']['wpa_eap_ca'] = $_POST['wpa_eap_ca'];
 	$wancfg['wireless']['auth_server_addr'] = $_POST['auth_server_addr'];
 	$wancfg['wireless']['auth_server_port'] = $_POST['auth_server_port'];
 	$wancfg['wireless']['auth_server_shared_secret'] = $_POST['auth_server_shared_secret'];
@@ -1827,17 +1850,15 @@ function check_wireless_mode() {
 // Find all possible media options for the interface
 $mediaopts_list = array();
 $intrealname = $config['interfaces'][$if]['if'];
-if (!is_pseudo_interface($intrealname, false)) {
-	exec("/sbin/ifconfig -m $intrealname | grep \"media \"", $mediaopts);
-	foreach ($mediaopts as $mediaopt) {
-		preg_match("/media (.*)/", $mediaopt, $matches);
-		if (preg_match("/(.*) mediaopt (.*)/", $matches[1], $matches1)) {
-			// there is media + mediaopt like "media 1000baseT mediaopt full-duplex"
-			array_push($mediaopts_list, $matches1[1] . " " . $matches1[2]);
-		} else {
-			// there is only media like "media 1000baseT"
-			array_push($mediaopts_list, $matches[1]);
-		}
+exec("/sbin/ifconfig -m $intrealname | grep \"media \"", $mediaopts);
+foreach ($mediaopts as $mediaopt) {
+	preg_match("/media (.*)/", $mediaopt, $matches);
+	if (preg_match("/(.*) mediaopt (.*)/", $matches[1], $matches1)) {
+		// there is media + mediaopt like "media 1000baseT mediaopt full-duplex"
+		array_push($mediaopts_list, $matches1[1] . " " . $matches1[2]);
+	} else {
+		// there is only media like "media 1000baseT"
+		array_push($mediaopts_list, $matches[1]);
 	}
 }
 
@@ -1964,25 +1985,27 @@ if ($show_address_controls) {
 	));
 }
 
-$macaddress = new Form_Input(
-	'spoofmac',
-	'MAC Address',
-	'text',
-	$pconfig['spoofmac'],
-	['placeholder' => 'xx:xx:xx:xx:xx:xx']
-);
+if (!is_pseudo_interface($intrealname, true)) {
+	$macaddress = new Form_Input(
+		'spoofmac',
+		'MAC Address',
+		'text',
+		$pconfig['spoofmac'],
+		['placeholder' => 'xx:xx:xx:xx:xx:xx']
+	);
 
-if (interface_is_vlan($realifname)) {
-	$macaddress->setDisabled();
-	$macaddress->setHelp('The MAC address of a VLAN interface must be ' .
-	    'set on its parent interface');
-} else {
-	$macaddress->setHelp('This field can be used to modify ("spoof") the ' .
-	    'MAC address of this interface.%sEnter a MAC address in the ' .
-	    'following format: xx:xx:xx:xx:xx:xx or leave blank.', '<br />');
+	if (interface_is_vlan($realifname)) {
+		$macaddress->setDisabled();
+		$macaddress->setHelp('The MAC address of a VLAN interface must be ' .
+		    'set on its parent interface');
+	} else {
+		$macaddress->setHelp('This field can be used to modify ("spoof") the ' .
+		    'MAC address of this interface.%sEnter a MAC address in the ' .
+		    'following format: xx:xx:xx:xx:xx:xx or leave blank.', '<br />');
+	}
+
+	$section->addInput($macaddress);
 }
-
-$section->addInput($macaddress);
 
 $section->addInput(new Form_Input(
 	'mtu',
@@ -1997,8 +2020,8 @@ $section->addInput(new Form_Input(
 	'MSS',
 	'number',
 	$pconfig['mss']
-))->setHelp('If a value is entered in this field, then MSS clamping for TCP connections to the value entered above minus 40 (TCP/IP ' .
-			'header size) will be in effect.');
+))->setHelp('If a value is entered in this field, then MSS clamping for TCP connections to the value entered above ' .
+	    'minus 40 for IPv4 (TCP/IPv4 header size) and minus 60 for IPv6 (TCP/IPv6 header size) will be in effect.');
 
 if (count($mediaopts_list) > 0) {
 	$section->addInput(new Form_Select(
@@ -3330,18 +3353,18 @@ if (isset($wancfg['wireless'])) {
 		'yes'
 	));
 
-	$section->addInput(new Form_Input(
-		'passphrase',
-		'WPA Pre-Shared Key',
-		'text',
-		$pconfig['passphrase']
-	))->setHelp('WPA Passphrase must be between 8 and 63 characters long');
-
 	$section->addInput(new Form_Select(
 		'wpa_mode',
 		'WPA mode',
 		(isset($pconfig['wpa_mode'])) ? $pconfig['wpa_mode']: '2',
 		['1' => gettext('WPA'), '2' => gettext('WPA2'), '3' => gettext('Both')]
+	));
+
+	$section->addInput(new Form_Select(
+		'wpa_pairwise',
+		'WPA Pairwise',
+		(isset($pconfig['wpa_pairwise'])) ? $pconfig['wpa_pairwise']:'CCMP',
+		['CCMP TKIP' => gettext('Both'), 'CCMP' => gettext('AES (recommended)'), 'TKIP' => gettext('TKIP')]
 	));
 
 	$section->addInput(new Form_Select(
@@ -3351,11 +3374,53 @@ if (isset($wancfg['wireless'])) {
 		['WPA-PSK' => gettext('Pre-Shared Key'), 'WPA-EAP' => gettext('Extensible Authentication Protocol'), 'WPA-PSK WPA-EAP' => gettext('Both')]
 	));
 
+	$section->addInput(new Form_Input(
+		'passphrase',
+		'WPA Pre-Shared Key',
+		'text',
+		$pconfig['passphrase']
+	))->setHelp('WPA Passphrase must be between 8 and 63 characters long');
+
 	$section->addInput(new Form_Select(
-		'wpa_pairwise',
-		'WPA Pairwise',
-		(isset($pconfig['wpa_pairwise'])) ? $pconfig['wpa_pairwise']:'CCMP',
-		['CCMP TKIP' => gettext('Both'), 'CCMP' => gettext('AES (recommended)'), 'TKIP' => gettext('TKIP')]
+		'wpa_eap_client_mode',
+		'EAP Client Mode',
+		$pconfig['wpa_eap_client_mode'],
+		['PEAP' => 'PEAP', 'TLS' => 'TLS', 'TTLS' => 'TTLS']
+	));
+
+	$section->addInput(new Form_Select(
+		'wpa_eap_ca',
+		'Certificate Authority',
+		$pconfig['wpa_eap_ca'],
+		cert_build_list('ca', 'HTTPS')
+	));
+
+	$section->addInput(new Form_Select(
+		'wpa_eap_inner_auth',
+		'Inner Authentication Method',
+		$pconfig['wpa_eap_inner_auth'],
+		['MSCHAPV2' => gettext('MSCHAPv2'), 'MD5' => gettext('MD5'), 'PAP' => gettext('PAP')]
+	));
+
+	$section->addInput(new Form_Input(
+		'wpa_eap_inner_id',
+		'*Inner Authentication Identity',
+		'text',
+		$pconfig['wpa_eap_inner_id']
+	));
+
+	$section->addInput(new Form_Input(
+		'wpa_eap_inner_password',
+		'*Inner Authentication Passphrase',
+		'text',
+		$pconfig['wpa_eap_inner_password']
+	));
+
+	$section->addInput(new Form_Select(
+		'wpa_eap_cert',
+		'TLS/TTLS Client Certificate',
+		$pconfig['wpa_eap_cert'],
+		cert_build_list('cert', 'HTTPS')
 	));
 
 	$section->addInput(new Form_Input(
@@ -3385,6 +3450,7 @@ if (isset($wancfg['wireless'])) {
 	$form->add($section);
 
 	$section = new Form_Section('802.1x RADIUS Options');
+	$section->addClass('ieee8021x_group');
 
 	$section->addInput(new Form_Checkbox(
 		'ieee8021x',
@@ -3392,7 +3458,7 @@ if (isset($wancfg['wireless'])) {
 		'Enable 802.1X authentication',
 		$pconfig['ieee8021x'],
 		'yes'
-	))->setHelp('This option requires that the "Enable WPA box" is checked');
+	));
 
 	$group = new Form_Group('Primary 802.1X server');
 
@@ -3448,7 +3514,7 @@ if (isset($wancfg['wireless'])) {
 		null,
 		$pconfig['rsn_preauth'],
 		'yes'
-	));
+	))->setHelp('Pre-authentication to speed up roaming between access points.');
 
 	$form->add($section);
 }
@@ -3848,6 +3914,140 @@ events.push(function() {
 		setRequired('pptp_idletimeout', $('#pptp_dialondemand').prop('checked'));
 	}
 
+	function show_wpaoptions() {
+		var wpa = !($('#wpa_enable').prop('checked'));
+
+		hideInput('passphrase', wpa);
+		hideInput('wpa_mode', wpa);
+		hideInput('wpa_key_mgmt', wpa);
+		hideInput('wpa_pairwise', wpa);
+		hideCheckbox('wpa_strict_rekey', wpa);
+		hideClass('ieee8021x_group', true);
+		if ($('#mode').val() == 'hostap') {
+			hideInput('wpa_group_rekey', wpa);
+			hideInput('wpa_gmk_rekey', wpa);
+			hideCheckbox('wpa_strict_rekey', wpa);
+		} else {
+			hideInput('wpa_group_rekey', true);
+			hideInput('wpa_gmk_rekey', true);
+			hideCheckbox('wpa_strict_rekey', true);
+		}
+		updatewpakeymgmt($('#wpa_key_mgmt').val());
+	}
+
+	function updatewifistandard(s) {
+		switch (s) {
+			case "auto": {
+				hideInput('protmode', false);
+				hideInput('channel_width', false);
+				break;
+			}
+			case "11b": {
+				hideInput('protmode', true);
+				hideInput('channel_width', true);
+				break;
+			}
+			case "11g": {
+				hideInput('protmode', false);
+				hideInput('channel_width', true);
+				break;
+			}
+			case "11ng": {
+				hideInput('protmode', false);
+				hideInput('channel_width', false);
+				break;
+			}
+			case "11a": {
+				hideInput('protmode', true);
+				hideInput('channel_width', true);
+				break;
+			}
+			case "11na": {
+				hideInput('protmode', true);
+				hideInput('channel_width', false);
+				break;
+			}
+			default: {
+				break;
+			}
+		}
+	}
+
+	function updatewifimode(m) {
+		switch (m) {
+			case "adhoc": {
+				hideInput('puremode', true);
+				hideCheckbox('apbridge_enable', true);
+				hideCheckbox('hidessid_enable', false);
+				break;
+			}
+			case "hostap": {
+				hideInput('puremode', false);
+				hideCheckbox('apbridge_enable', false);
+				hideCheckbox('hidessid_enable', false);
+				break;
+			}
+			default: {
+				hideInput('puremode', true);
+				hideCheckbox('apbridge_enable', true);
+				hideCheckbox('hidessid_enable', true);
+				break;
+			}
+		}
+		show_wpaoptions();
+	}
+
+	function updateeapclientmode(m) {
+		var wpa = !($('#wpa_enable').prop('checked'));
+		switch (m) {
+			case "peap": {
+				hideInput('wpa_eap_cert', true);
+				hideInput('wpa_eap_inner_auth', wpa);
+				hideInput('wpa_eap_inner_id', wpa);
+				hideInput('wpa_eap_inner_password', wpa);
+				break;
+			}
+			case "tls": {
+				hideInput('wpa_eap_cert', wpa);
+				hideInput('wpa_eap_inner_auth', true);
+				hideInput('wpa_eap_inner_id', true);
+				hideInput('wpa_eap_inner_password', true);
+				break;
+			}
+			case "ttls": {
+				hideInput('wpa_eap_cert', wpa);
+				hideInput('wpa_eap_inner_auth', wpa);
+				hideInput('wpa_eap_inner_id', wpa);
+				hideInput('wpa_eap_inner_password', wpa);
+				break;
+			}
+			default: {
+				break;
+			}
+		}
+	}
+
+	function updatewpakeymgmt(m) {
+		var wpa = !($('#wpa_enable').prop('checked'));
+		if ((m == "WPA-EAP") && ($('#mode').val() == 'bss')) {
+			hideInput('passphrase', true);
+			hideInput('wpa_eap_client_mode', false);
+			hideInput('wpa_eap_ca', false);
+			updateeapclientmode($('#wpa_eap_client_mode').val());
+		} else if ((m != "WPA-PSK") && ($('#mode').val() == 'hostap')) {
+			hideClass('ieee8021x_group', false);
+		} else {
+			hideInput('passphrase', wpa);
+			hideInput('wpa_eap_client_mode', true);
+			hideInput('wpa_eap_ca', true);
+			hideInput('wpa_eap_cert', true);
+			hideInput('wpa_eap_inner_auth', true);
+			hideInput('wpa_eap_inner_id', true);
+			hideInput('wpa_eap_inner_password', true);
+			hideClass('ieee8021x_group', true);
+		}
+	}
+
 	// ---------- On initial page load ------------------------------------------------------------
 
 	updateType($('#type').val());
@@ -3859,6 +4059,11 @@ events.push(function() {
 	setDHCPoptions();
 	setPPPoEDialOnDemandItems();
 	setPPTPDialOnDemandItems();
+	show_wpaoptions();
+	updatewifistandard($('#standard').val());
+	updatewifimode($('#mode').val());
+	updatewpakeymgmt($('#wpa_key_mgmt').val());
+	updateeapclientmode($('#wpa_eap_client_mode').val());
 
 	// Set preset buttons on page load
 	var sv = "<?=htmlspecialchars($pconfig['adv_dhcp_pt_values']);?>";
@@ -3887,6 +4092,22 @@ events.push(function() {
 
 	$('#type6').on('change', function() {
 		updateTypeSix(this.value);
+	});
+
+	$('#standard').on('change', function() {
+		updatewifistandard(this.value);
+	});
+
+	$('#mode').on('change', function() {
+		updatewifimode(this.value);
+	});
+
+	$('#wpa_key_mgmt').on('change', function() {
+		updatewpakeymgmt(this.value);
+	});
+
+	$('#wpa_eap_client_mode').on('change', function() {
+		updateeapclientmode(this.value);
 	});
 
 	$('#track6-interface').on('change', function() {
@@ -3958,6 +4179,10 @@ events.push(function() {
 
 	$('[name=adv_dhcp_pt_values]').click(function () {
 	   setPresets($('input[name=adv_dhcp_pt_values]:checked').val());
+	});
+
+	$('#wpa_enable').click(function () {
+		show_wpaoptions();
 	});
 
 	$('#pppoe_resetdate').datepicker();

@@ -97,8 +97,14 @@ $icmptypes = array(
  * Specify the driver prefix to match (from the left)
  * https://redmine.pfsense.org/issues/8685
  */
-global $filter_interface_blacklist;
-$filter_interface_blacklist = array("ipsec");
+global $filter_interface_remove;
+$filter_interface_remove = array();
+
+if ($config['ipsec']['filtermode'] == 'if_ipsec') {
+	$filter_interface_remove[] = 'enc';
+} else {
+	$filter_interface_remove[] = 'ipsec';
+}
 
 /*
  * Fixed tracker values (used to group and track usage in GUI):
@@ -628,12 +634,20 @@ function filter_generate_scrubing() {
 		if (isset($scrubcfg['virtual']) || empty($scrubcfg['descr'])) {
 			continue;
 		}
+		if (($scrubcfg['type6'] == '6rd') || ($scrubcfg['type6'] == '6to4')) {
+			$scrubifname6 = $scrubcfg['descr'] . "_STF";
+		} else {
+			$scrubifname6 = $scrubcfg['descr'];
+		}
 		/* set up MSS clamping */
 		if (($scrubcfg['mss'] <> "") &&
 		    (is_numeric($scrubcfg['mss']))) {
-			$mssclamp = "max-mss " . (intval($scrubcfg['mss'] - 40));
+			/* different size of IPv4/IPv6 header, https://redmine.pfsense.org/issues/11409 */
+			$mssclamp4 = "max-mss " . (intval($scrubcfg['mss'] - 40));
+			$mssclamp6 = "max-mss " . (intval($scrubcfg['mss'] - 60));
 		} else {
-			$mssclamp = "";
+			$mssclamp4 = "";
+			$mssclamp6 = "";
 		}
 		/* configure no-df for linux nfs and others */
 		if ($config['system']['scrubnodf']) {
@@ -647,9 +661,13 @@ function filter_generate_scrubing() {
 			$scrubrnid = "";
 		}
 		if (!isset($config['system']['disablescrub'])) {
-			$scrubrules .= "scrub on \${$scrubcfg['descr']} all {$scrubnodf} {$scrubrnid} {$mssclamp} fragment reassemble\n"; // reassemble all directions
-		} else if (!empty($mssclamp)) {
-			$scrubrules .= "scrub on \${$scrubcfg['descr']} {$mssclamp}\n";
+			$scrubrules .= "scrub on \${$scrubcfg['descr']} inet all {$scrubnodf} {$scrubrnid} {$mssclamp4} " .
+			    "fragment reassemble\n"; // reassemble all directions
+			$scrubrules .= "scrub on \${$scrubifname6} inet6 all {$scrubnodf} {$scrubrnid} {$mssclamp6} " .
+			    "fragment reassemble\n";
+		} else if (!empty($mssclamp4)) {
+			$scrubrules .= "scrub on \${$scrubcfg['descr']} inet {$mssclamp4}\n";
+			$scrubrules .= "scrub on \${$scrubifname6} inet6 {$mssclamp6}\n";
 		}
 	}
 	return $scrubrules;
@@ -1086,23 +1104,6 @@ function filter_get_vpns_list() {
 		}
 	}
 
-	/* wireguard */
-	if (is_wg_enabled()) {
-		foreach ($config['wireguard']['tunnel'] as $wg) {
-			if (empty($wg['enabled'])) {
-				continue;
-			}
-			if (!is_array($wg['peers']['wgpeer']) ||
-			    count($wg['peers']['wgpeer']) == 0) {
-				continue;
-			}
-			$wgpeer = $wg['peers']['wgpeer'];
-			foreach (explode(",", $wgpeer['allowedips']) as $ip) {
-				$vpns_arr[] = $ip;
-			}
-		}
-	}
-
 	if (!empty($vpns_arr)) {
 		$vpns = implode(" ", $vpns_arr);
 	}
@@ -1309,15 +1310,6 @@ function filter_generate_optcfg_array() {
 		$oic['type'] = "none";
 		$oic['virtual'] = true;
 		$FilterIflist['openvpn'] = $oic;
-	}
-	/* add wireguard interfaces */
-	if (is_wg_enabled()) {
-		$oic = array();
-		$oic['if'] = "wg";
-		$oic['descr'] = 'WireGuard';
-		$oic['type'] = "none";
-		$oic['virtual'] = true;
-		$FilterIflist['wireguard'] = $oic;
 	}
 	/* add interface groups */
 	if (isset($config['ifgroups']['ifgroupentry']) && is_array($config['ifgroups']['ifgroupentry'])) {
@@ -1764,11 +1756,6 @@ function filter_nat_rules_automatic_tonathosts($with_descr = false) {
 		}
 	}
 
-	foreach (wg_get_tunnel_networks('ipv4') as $wgn) {
-		$tonathosts[] = $wgn;
-		$descriptions[] = gettext('WireGuard');
-	}
-
 	/* IPsec mode_cfg subnet */
 	if ((isset($config['ipsec']['client']['enable'])) &&
 	    (!empty($config['ipsec']['client']['pool_address'])) &&
@@ -1826,8 +1813,7 @@ function filter_nat_rules_outbound_automatic($src) {
 	$rules = array();
 	foreach ($FilterIflist as $if => $ifcfg) {
 		if ((substr($ifcfg['if'], 0, 4) == "ovpn") ||
-		    (substr($ifcfg['if'], 0, 5) == "ipsec") ||
-		    (substr($ifcfg['if'], 0, 2) == "wg")) {
+		    (substr($ifcfg['if'], 0, 5) == "ipsec")) {
 			continue;
 		}
 		if (!interface_has_gateway($if)) {
@@ -2183,8 +2169,7 @@ function filter_nat_rules_generate() {
 		if (is_array($config['ipsec']['phase2'])) {
 			foreach ($config['ipsec']['phase2'] as $ph2ent) {
 				if ($ph2ent['mode'] != 'transport' && !empty($ph2ent['natlocalid']) && !isset($ph2ent['disabled'])) {
-					ipsec_lookup_phase1($ph2ent, $ph1ent);
-					if (!is_array($ph1ent)) {
+					if (!ipsec_lookup_phase1($ph2ent, $ph1ent)) {
 						continue;
 					}
 					if (isset($ph1ent['disabled'])) {
@@ -2890,7 +2875,13 @@ function filter_generate_address(& $rule, $target = "source", $isnat = false) {
 			filter_address_add_vips_subnets($src, $rule[$target]['network'], isset($rule[$target]['not']));
 		}
 	} else if ($rule[$target]['address']) {
-		$expsrc = alias_expand($rule[$target]['address']);
+		/* static host portion of IPv6, see https://redmine.pfsense.org/issues/6626 */
+		if (substr($rule[$target]['address'], 0, 2) == '::') {
+			$expsrc = merge_ipv6_delegated_prefix(get_interface_ipv6($rule['interface']),
+			    $rule[$target]['address'], get_interface_subnetv6($rule['interface']));
+		} else {
+			$expsrc = alias_expand($rule[$target]['address']);
+		}
 		if (isset($rule[$target]['not'])) {
 			$not = "!";
 		} else {
@@ -2910,7 +2901,7 @@ function filter_generate_address(& $rule, $target = "source", $isnat = false) {
 
 function filter_generate_user_rule($rule) {
 	global $config, $g, $FilterIflist, $GatewaysList;
-	global $dummynet_name_list, $vlanprio_values;
+	global $dummynet_name_list, $vlanprio_values, $time_based_rules;
 
 	if (isset($config['system']['developerspew'])) {
 		$mt = microtime();
@@ -2945,7 +2936,11 @@ function filter_generate_user_rule($rule) {
 			if (!empty($ifliste)) {
 				$aline['interface'] = " on { {$ifliste} } ";
 			} else {
-				$aline['interface'] = "";
+				/* This rule specifies interface(s), but none of those were
+				 * found in the enabled list, so just ignore the rule.
+				 * See https://redmine.pfsense.org/issues/11688.
+				 */
+				return "# rule " . $rule['descr'] . " has no enabled interfaces";
 			}
 		} else {
 			$aline['interface'] = "";
@@ -3095,8 +3090,8 @@ function filter_generate_user_rule($rule) {
 
 	/* source address */
 	$src = trim(filter_generate_address($rule, "source"));
-	if (empty($src) || ($src == "/")) {
-		return "# at the break!";
+	if (empty($src) || ($src == "/") || ($src == "!")) {
+		return "# source address is empty. ";
 	}
 	$aline['src'] = " from $src ";
 
@@ -3107,8 +3102,8 @@ function filter_generate_user_rule($rule) {
 
 	/* destination address */
 	$dst = trim(filter_generate_address($rule, "destination"));
-	if (empty($dst) || ($dst == "/")) {
-		return "# returning at dst $dst == \"/\"";
+	if (empty($dst) || ($dst == "/") || ($dst == "!")) {
+		return "# destination address is empty. ";
 	}
 	$aline['dst'] = "to $dst ";
 
@@ -3321,6 +3316,18 @@ function filter_generate_user_rule($rule) {
 	}
 	if ($rule['dnpipe'] <> "") {
 		if (!empty($dummynet_name_list[$rule['dnpipe']])) {
+			/* https://redmine.pfsense.org/issues/11636 */
+			foreach ($config['dnshaper']['queue'] as $queue) {
+				if (($queue['name'] == $rule['dnpipe']) &&
+				    is_array($queue['bandwidth']['item'])) {
+					foreach ($queue['bandwidth']['item'] as $bw) {
+				       		if ($bw['bwsched'] != "none") {
+							$time_based_rules = true;
+							break 2;
+						}
+					}
+				}
+			}
 			if ($dummynet_name_list[$rule['dnpipe']][0] == "?") {
 				$aline['dnpipe'] = " dnqueue( ";
 				$aline['dnpipe'] .= substr($dummynet_name_list[$rule['dnpipe']], 1);
@@ -3389,7 +3396,7 @@ function filter_generate_user_rule($rule) {
 function filter_rules_generate() {
 	global $config, $g, $FilterIflist, $time_based_rules, $GatewaysList,
 	       $tracker, $vlanprio_values, $antilockout_tracker,
-	       $bogons_tracker, $rfc1918_tracker;
+	       $bogons_tracker, $rfc1918_tracker, $vpn_and_ppp_ifs;
 
 	$fix_rule_label = 'fix_rule_label';
 	$increment_tracker = 'filter_rule_tracker';
@@ -3963,7 +3970,6 @@ EOD;
 		$rule_arr1 = array();
 		$rule_arr2 = array();
 		$rule_arr3 = array();
-		$vpn_and_ppp_ifs = array("l2tp", "pptp", "pppoe", "enc0", "openvpn", "wireguard");
 		/*
 		 * NB: The order must be: Floating rules, then interface group and then regular ones.
 		 */
@@ -4700,13 +4706,13 @@ function move_separators(&$a_separators, $ridx, $mvnrows) {
 }
 
 function filter_get_interface_list() {
-	global $filter_interface_blacklist;
+	global $filter_interface_remove;
 	$iflist = create_interface_list();
 	$filter_ifs = array();
 	foreach ($iflist as $ifent => $ifname) {
 		$realifname = get_real_interface($ifent);
-		foreach ($filter_interface_blacklist as $ifbl) {
-			if (substr($realifname, 0, strlen($ifbl)) == $ifbl) {
+		foreach ($filter_interface_remove as $ifr) {
+			if (substr($realifname, 0, strlen($ifr)) == $ifr) {
 				continue 2;
 			}
 		}

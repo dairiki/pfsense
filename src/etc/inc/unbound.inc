@@ -167,6 +167,10 @@ function unbound_generate_config_text($unboundcfg = NULL, $cfgsubdir = "") {
 		$unboundcfg = $config['unbound'];
 	}
 
+	if (platform_booting()) {
+		unlink_if_exists("{$g['unbound_chroot_path']}{$cfgsubdir}/openvpn.*.conf");
+	}
+
 	// Setup optimization
 	$optimization = unbound_optimization();
 
@@ -663,7 +667,7 @@ function unbound_add_domain_overrides($pvt_rev="", $cfgsubdir = "") {
 			$domain_entries .= "private-domain: \"$domain\"\n";
 			$domain_entries .= "domain-insecure: \"$domain\"\n";
 		} else if ($pvt_rev == "reverse") {
-			if ((substr($domain, -14) == ".in-addr.arpa.") || (substr($domain, -13) == ".in-addr.arpa")) {
+			if (preg_match("/.+\.(in-addr|ip6)\.arpa\.?$/", $domain)) {
 				$domain_entries .= "local-zone: \"$domain\" typetransparent\n";
 			}
 		} else {
@@ -921,9 +925,6 @@ function unbound_acls_config($cfgsubdir = "") {
 		    (!empty($config['ipsec']['client']['pool_netbits_v6']))) {
 			$aclnets[] = "{$config['ipsec']['client']['pool_address_v6']}/{$config['ipsec']['client']['pool_netbits_v6']}";
 		}
-
-		// WireGuard Interface Networks
-		$aclnets = array_merge($aclnets, wg_get_tunnel_networks());
 
 		// Generate IPv4 access-control entries using the same logic as automatic outbound NAT
 		if (empty($FilterIflist)) {
