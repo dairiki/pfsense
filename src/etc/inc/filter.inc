@@ -686,6 +686,9 @@ function filter_generate_scrubing() {
 	global $FilterIflist;
 	$scrubrules = "";
 
+	/* GTD: Hook for customizations of scrub rules */
+	$scrubrules .= "include \"/etc/pf/local.scrub.conf\"\n";
+
 	/* see https://redmine.pfsense.org/issues/7801 */
 	if (config_path_enabled('system','vpn_scrubnodf')) {
 		$scrubnodf = "no-df";
