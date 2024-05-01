@@ -214,10 +214,13 @@ function services_radvd_configure($blacklist = array()) {
 				if (is_subnetv6($subnet)) {
 					$radvdconf .= "\tprefix {$subnet} {\n";
 					$radvdconf .= "\t\tDeprecatePrefix on;\n";
+					/*
 					switch ($dhcpv6ifconf['ramode']) {
 						case "managed":
+					*/
 							$radvdconf .= "\t\tAdvOnLink on;\n";
 							$radvdconf .= "\t\tAdvAutonomous off;\n";
+					/*
 							break;
 						case "router":
 							$radvdconf .= "\t\tAdvOnLink off;\n";
@@ -232,6 +235,7 @@ function services_radvd_configure($blacklist = array()) {
 							$radvdconf .= "\t\tAdvAutonomous on;\n";
 							break;
 					}
+					*/
 					$radvdconf .= "\t};\n";
 				}
 			}
