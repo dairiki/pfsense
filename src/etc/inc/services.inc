@@ -224,12 +224,24 @@ function services_radvd_configure($blacklist = array()) {
 							$radvdconf .= "\t\tAdvAutonomous off;\n";
 							break;
 						case "assist":
+							$radvdconf .= "\t\t# ramode = assist\n";
 							$radvdconf .= "\t\tAdvOnLink on;\n";
-							$radvdconf .= "\t\tAdvAutonomous on;\n";
+							/* Disable autonomous unless 64 bit subnet */
+				        		if (preg_match('#/(?!64$)(\d+)$#', $subnet)) {
+							  $radvdconf .= "\t\tAdvAutonomous off;\n";
+							} else {
+							  $radvdconf .= "\t\tAdvAutonomous on;\n";
+							}
 							break;
 						case "unmanaged":
+							$radvdconf .= "\t\t# ramode = unmanaged\n";
 							$radvdconf .= "\t\tAdvOnLink on;\n";
-							$radvdconf .= "\t\tAdvAutonomous on;\n";
+							/* Disable autonomous unless 64 bit subnet */
+				        		if (preg_match('#/(?!64$)(\d+)$#', $subnet)) {
+							  $radvdconf .= "\t\tAdvAutonomous off;\n";
+							} else {
+							  $radvdconf .= "\t\tAdvAutonomous on;\n";
+							}
 							break;
 					}
 					$radvdconf .= "\t};\n";
